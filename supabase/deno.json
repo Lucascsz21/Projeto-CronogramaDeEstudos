@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "react",
+    "lib": ["deno.window", "deno.ns"]
+  },
+  "imports": {},
+  "tasks": {
+    "dev": "deno run --watch --allow-all supabase/functions/generate-study-plan/index.ts",
+    "build": "deno run --allow-all supabase/functions/generate-study-plan/index.ts"
+  }
+}
