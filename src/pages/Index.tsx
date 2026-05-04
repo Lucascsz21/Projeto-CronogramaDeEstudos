@@ -16,6 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 
 interface Conteudo { id: string; nome: string; dificuldade: number; }
 interface Atividade { conteudo: string; subtopico?: string; tipo: "estudo" | "revisão"; duracao_horas: number; dificuldade: number; }
@@ -38,6 +39,7 @@ const Index = () => {
   ]);
   const [loading, setLoading] = useState(false);
   const [plano, setPlano] = useState<Plano | null>(null);
+  const { logout, user } = useAuth();
 
   const addConteudo = () =>
     setConteudos((p) => [...p, { id: crypto.randomUUID(), nome: "", dificuldade: 3 }]);
@@ -97,9 +99,18 @@ const Index = () => {
               <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Study, smarter</div>
             </div>
           </div>
+          <div>
+            <span>Foco total, {user?.name}!</span> 
+          </div>
           <div className="hidden sm:flex items-center gap-1.5 text-xs text-muted-foreground">
-            <span className="h-1.5 w-1.5 rounded-full bg-success animate-pulse" />
-            IA online
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={logout}
+                className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
+              >
+                Sair
+              </Button>
           </div>
         </div>
       </nav>
