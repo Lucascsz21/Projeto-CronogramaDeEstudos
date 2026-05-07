@@ -13,13 +13,14 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 
 interface Conteudo { id: string; nome: string; dificuldade: number; }
-interface Atividade { conteudo: string; subtopico?: string; tipo: "estudo" | "revisão"; duracao_horas: number; dificuldade: number; }
+interface Atividade { conteudo: string; subtopico?: string; tipo: "estudo" | "revisão"; duracao_horas: number; dificuldade: number; concluida?: boolean; }
 interface DiaCronograma { data: string; total_horas: number; atividades: Atividade[]; }
 interface Trilha { materia: string; subtopicos: string[]; }
 interface Plano { resumo_geral: string; trilhas?: Trilha[]; cronograma: DiaCronograma[]; dicas: string[]; }
@@ -30,10 +31,17 @@ const dificuldadeColor = (n: number) => {
   return "bg-destructive/10 text-destructive border-destructive/25";
 };
 
+const CARGAS_ESTUDO: Record<number, string> = {
+  1: "Carga Baixa",
+  2: "Carga Baixa/Média",
+  3: "Carga Média",
+  4: "Carga Média/Alta",
+  5: "Carga Alta",
+};
+
 const Index = () => {
   const [dataProva, setDataProva] = useState<Date | undefined>();
-  const [tempoDiario, setTempoDiario] = useState<number[]>([3]);
-  const [preferencia, setPreferencia] = useState<string>("noite");
+  const [tempoDiario, setTempoDiario] = useState<string>("3");
   const [conteudos, setConteudos] = useState<Conteudo[]>([
     { id: crypto.randomUUID(), nome: "", dificuldade: 3 },
   ]);
@@ -62,8 +70,8 @@ const Index = () => {
         body: {
           data_prova: format(dataProva, "yyyy-MM-dd"),
           data_atual: format(new Date(), "yyyy-MM-dd"),
-          tempo_diario: tempoDiario[0],
-          preferencia,
+          tempo_diario: Number(tempoDiario) || 3,
+          preferencia: "qualquer",
           conteudos: validos.map((c) => ({ nome: c.nome.trim(), dificuldade: c.dificuldade })),
         },
       });
@@ -79,6 +87,23 @@ const Index = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const toggleAtividade = (diaIdx: number, atividadeIdx: number) => {
+    setPlano((prev) => {
+      if (!prev) return prev;
+      const newCronograma = [...prev.cronograma];
+      const dia = { ...newCronograma[diaIdx] };
+      const atividades = [...dia.atividades];
+      const atividade = { ...atividades[atividadeIdx] };
+
+      atividade.concluida = !atividade.concluida;
+      atividades[atividadeIdx] = atividade;
+      dia.atividades = atividades;
+      newCronograma[diaIdx] = dia;
+
+      return { ...prev, cronograma: newCronograma };
+    });
   };
 
   return (
@@ -100,17 +125,17 @@ const Index = () => {
             </div>
           </div>
           <div>
-            <span>Foco total, {user?.name}!</span> 
+            <span>Foco total, {user?.name}!</span>
           </div>
           <div className="hidden sm:flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={logout}
-                className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
-              >
-                Sair
-              </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={logout}
+              className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
+            >
+              Sair
+            </Button>
           </div>
         </div>
       </nav>
@@ -150,8 +175,8 @@ const Index = () => {
                   Criar meu cronograma
                   <ArrowRight className="h-4 w-4 ml-2 group-hover:translate-x-0.5 transition-transform" />
                 </Button>
-                <div className="text-xs text-muted-foreground">
-                  Grátis · Sem cadastro · ~10 segundos
+                <div className="text-base text-muted-foreground">
+                  Crie seu Cronograma em questão de segundos!
                 </div>
               </div>
             </div>
@@ -264,7 +289,7 @@ const Index = () => {
 
         <div className="glass-card rounded-3xl p-5 sm:p-8 md:p-10 space-y-8 md:space-y-10 noise relative overflow-hidden animate-fade-up delay-100">
           {/* row 1 */}
-          <div className="grid md:grid-cols-3 gap-5 md:gap-6">
+          <div className="grid md:grid-cols-2 gap-5 md:gap-6">
             <div className="space-y-2.5">
               <Label className="flex items-center gap-2 text-xs uppercase tracking-wider text-muted-foreground font-medium">
                 <CalendarIcon className="h-3.5 w-3.5 text-accent" /> Data da prova
@@ -303,29 +328,16 @@ const Index = () => {
             <div className="space-y-2.5">
               <Label className="flex items-center gap-2 text-xs uppercase tracking-wider text-muted-foreground font-medium">
                 <Clock className="h-3.5 w-3.5 text-accent" /> Horas por dia
-                <span className="ml-auto text-foreground font-display text-base normal-case tracking-normal">
-                  {tempoDiario[0]}h
-                </span>
               </Label>
-              <div className="h-12 flex items-center px-1 rounded-md bg-input/40 border border-border">
-                <Slider value={tempoDiario} onValueChange={setTempoDiario} min={1} max={12} step={0.5} />
-              </div>
-            </div>
-
-            <div className="space-y-2.5">
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground font-medium">
-                Melhor horário
-              </Label>
-              <Select value={preferencia} onValueChange={setPreferencia}>
-                <SelectTrigger className="h-12 bg-input/50 border-border">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="manhã">🌅 Manhã</SelectItem>
-                  <SelectItem value="tarde">☀️ Tarde</SelectItem>
-                  <SelectItem value="noite">🌙 Noite</SelectItem>
-                </SelectContent>
-              </Select>
+              <Input
+                type="number"
+                min="1"
+                max="24"
+                value={tempoDiario}
+                onChange={(e) => setTempoDiario(e.target.value)}
+                placeholder="Ex: 3"
+                className="h-12 bg-input/50 border-border text-base"
+              />
             </div>
           </div>
 
@@ -360,17 +372,23 @@ const Index = () => {
                   </div>
                   <div className="col-span-10 sm:col-span-6 flex items-center gap-3 sm:pl-2">
                     <span className="text-[10px] uppercase tracking-wider text-muted-foreground whitespace-nowrap hidden sm:inline">
-                      Dificuldade
+                      Carga de Estudo
                     </span>
-                    <Slider
-                      value={[c.dificuldade]}
-                      onValueChange={(v) => updateConteudo(c.id, { dificuldade: v[0] })}
-                      min={1} max={5} step={1}
-                      className="flex-1"
-                    />
-                    <Badge variant="outline" className={cn("min-w-9 justify-center font-display", dificuldadeColor(c.dificuldade))}>
-                      {c.dificuldade}
-                    </Badge>
+                    <Select
+                      value={c.dificuldade.toString()}
+                      onValueChange={(v) => updateConteudo(c.id, { dificuldade: parseInt(v) })}
+                    >
+                      <SelectTrigger className="h-10 w-full bg-background/50 border-border/60 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="1">Carga Baixa</SelectItem>
+                        <SelectItem value="2">Carga Baixa/Média</SelectItem>
+                        <SelectItem value="3">Carga Média</SelectItem>
+                        <SelectItem value="4">Carga Média/Alta</SelectItem>
+                        <SelectItem value="5">Carga Alta</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div className="col-span-2 sm:col-span-1 flex justify-end">
                     <Button
@@ -512,16 +530,27 @@ const Index = () => {
                       {dia.atividades.map((a, ai) => (
                         <li
                           key={ai}
-                          className="flex items-start gap-3 p-3 rounded-xl bg-secondary/30 border border-border/40 hover:border-border transition-colors"
+                          className={cn(
+                            "flex items-start gap-3 p-3 rounded-xl border transition-all",
+                            a.concluida ? "bg-secondary/10 border-border/20" : "bg-secondary/30 border-border/40 hover:border-border"
+                          )}
                         >
+                          <div className="flex items-center h-8 pt-1">
+                            <Checkbox
+                              checked={!!a.concluida}
+                              onCheckedChange={() => toggleAtividade(idx, ai)}
+                              className="h-5 w-5 rounded-[6px]"
+                            />
+                          </div>
                           <div className={cn(
-                            "mt-0.5 h-8 w-8 rounded-lg grid place-items-center flex-shrink-0",
-                            a.tipo === "revisão" ? "bg-accent/15 text-accent" : "bg-primary/15 text-primary-foreground"
+                            "mt-0.5 h-8 w-8 rounded-lg grid place-items-center flex-shrink-0 transition-all",
+                            a.tipo === "revisão" ? "bg-accent/15 text-accent" : "bg-primary/15 text-primary-foreground",
+                            a.concluida && "grayscale opacity-50"
                           )}>
                             {a.tipo === "revisão" ? <RotateCcw className="h-3.5 w-3.5" /> : <BookOpen className="h-3.5 w-3.5" />}
                           </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="text-sm font-medium truncate">{a.conteudo}</div>
+                          <div className={cn("flex-1 min-w-0 transition-all", a.concluida && "opacity-50")}>
+                            <div className={cn("text-sm font-medium truncate", a.concluida && "line-through")}>{a.conteudo}</div>
                             {a.subtopico && (
                               <div className="text-[12px] text-foreground/80 mt-0.5 leading-snug">
                                 <span className="serif-italic text-accent">›</span> {a.subtopico}
@@ -533,7 +562,7 @@ const Index = () => {
                               <span>{a.duracao_horas}h</span>
                               <span className="opacity-50">•</span>
                               <span className={cn("px-1.5 py-0.5 rounded border text-[10px]", dificuldadeColor(a.dificuldade))}>
-                                N{a.dificuldade}
+                                {CARGAS_ESTUDO[a.dificuldade] || `N${a.dificuldade}`}
                               </span>
                             </div>
                           </div>
