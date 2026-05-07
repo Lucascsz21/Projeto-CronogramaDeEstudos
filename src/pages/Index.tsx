@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { format, differenceInDays } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import {
   CalendarIcon, Plus, Sparkles, Trash2, BookOpen, Clock, Lightbulb,
   RotateCcw, ArrowRight, Brain, Zap, Target, GraduationCap, ListOrdered,
+  ChevronDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,6 +40,18 @@ const CARGAS_ESTUDO: Record<number, string> = {
   5: "Carga Alta",
 };
 
+/** Bloco Pomodoro de foco antes de poder marcar a atividade como concluída (8 min). */
+const POMODORO_SEGUNDOS = 8 * 60;
+
+function formatoRelogioMMSS(segundos: number): string {
+  const s = Math.max(0, Math.floor(Number(segundos) || 0));
+  const mm = Math.floor(s / 60);
+  const ss = s % 60;
+  return `${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
+}
+
+const pomodoroChave = (diaIdx: number, atividadeIdx: number) => `${diaIdx}-${atividadeIdx}`;
+
 const Index = () => {
   const [dataProva, setDataProva] = useState<Date | undefined>();
   /** Somente horas por dia (inteiro 1–24), valor do input tipo número */
@@ -55,6 +68,15 @@ const Index = () => {
   ]);
   const [loading, setLoading] = useState(false);
   const [plano, setPlano] = useState<Plano | null>(null);
+
+  const [pomoPopoverChave, setPomoPopoverChave] = useState<string | null>(null);
+  const [pomoSessaoChave, setPomoSessaoChave] = useState<string | null>(null);
+  const [pomoSegundosRestantes, setPomoSegundosRestantes] = useState(POMODORO_SEGUNDOS);
+  const [pomoRodando, setPomoRodando] = useState(false);
+
+  /** Destino atual do Pomodoro (evita closure velha no cronômetro ao zerar os 8 min). */
+  const pomoAlvoRef = useRef<{ diaIdx: number; atividadeIdx: number } | null>(null);
+
   const { logout, user } = useAuth();
 
   const addConteudo = () =>
@@ -100,22 +122,82 @@ const Index = () => {
     }
   };
 
-  const toggleAtividade = (diaIdx: number, atividadeIdx: number) => {
+  const marcarAtividadeConclusao = useCallback((diaIdx: number, atividadeIdx: number, concluida: boolean) => {
     setPlano((prev) => {
       if (!prev) return prev;
       const newCronograma = [...prev.cronograma];
       const dia = { ...newCronograma[diaIdx] };
       const atividades = [...dia.atividades];
-      const atividade = { ...atividades[atividadeIdx] };
-
-      atividade.concluida = !atividade.concluida;
+      const atividade = { ...atividades[atividadeIdx], concluida };
       atividades[atividadeIdx] = atividade;
       dia.atividades = atividades;
       newCronograma[diaIdx] = dia;
-
       return { ...prev, cronograma: newCronograma };
     });
+  }, []);
+
+  const resetarProgressoPomodoro = useCallback(() => {
+    setPomoRodando(false);
+    setPomoSegundosRestantes(POMODORO_SEGUNDOS);
+    setPomoSessaoChave(null);
+    pomoAlvoRef.current = null;
+  }, []);
+
+  const iniciarPomodoro = (diaIdx: number, atividadeIdx: number) => {
+    if (pomoRodando) {
+      if (pomodoroChave(diaIdx, atividadeIdx) === pomoSessaoChave) return;
+      toast.error("Já há um Pomodoro ativo. Cancele antes de iniciar outro.");
+      return;
+    }
+    pomoAlvoRef.current = { diaIdx, atividadeIdx };
+    setPomoSessaoChave(pomodoroChave(diaIdx, atividadeIdx));
+    setPomoSegundosRestantes(POMODORO_SEGUNDOS);
+    setPomoRodando(true);
   };
+
+  const cancelarPomodoroComReset = () => {
+    toast.message("Tempo zerado — inicie novamente quando estiver focado.", { duration: 3200 });
+    resetarProgressoPomodoro();
+    setPomoPopoverChave(null);
+  };
+
+  /** Silencia o toast (ex.: ao desmarcar a atividade com timer ativo nesta linha). */
+  const encerrarPomodoroSemToast = () => {
+    resetarProgressoPomodoro();
+    setPomoPopoverChave(null);
+  };
+
+  useEffect(() => {
+    if (!plano) {
+      resetarProgressoPomodoro();
+    }
+  }, [plano, resetarProgressoPomodoro]);
+
+  useEffect(() => {
+    if (!pomoRodando) return;
+    const id = window.setInterval(() => {
+      setPomoSegundosRestantes((prev) => {
+        if (prev === 0) return 0;
+        if (prev === 1) {
+          const alvo = pomoAlvoRef.current;
+          queueMicrotask(() => {
+            if (alvo) {
+              marcarAtividadeConclusao(alvo.diaIdx, alvo.atividadeIdx, true);
+              toast.success(`Pomodoro de ${POMODORO_SEGUNDOS / 60} min concluído!`);
+            }
+            setPomoRodando(false);
+            setPomoSessaoChave(null);
+            pomoAlvoRef.current = null;
+            setPomoSegundosRestantes(POMODORO_SEGUNDOS);
+            setPomoPopoverChave(null);
+          });
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [pomoRodando, marcarAtividadeConclusao]);
 
   return (
     <main className="min-h-screen relative overflow-x-hidden">
@@ -563,13 +645,108 @@ const Index = () => {
                             a.concluida ? "bg-secondary/10 border-border/20" : "bg-secondary/30 border-border/40 hover:border-border"
                           )}
                         >
-                          <div className="flex items-center h-8 pt-1">
-                            <Checkbox
-                              checked={!!a.concluida}
-                              onCheckedChange={() => toggleAtividade(idx, ai)}
-                              className="h-5 w-5 rounded-[6px]"
-                            />
+                          {(() => {
+                            const chaveLinha = pomodoroChave(idx, ai);
+                            const pomodoroNestaLinha = pomoSessaoChave === chaveLinha;
+                            const visorRelogio = pomodoroNestaLinha
+                              ? pomoSegundosRestantes
+                              : POMODORO_SEGUNDOS;
+                            return (
+                          <div className="flex items-start gap-2 pt-1 flex-shrink-0">
+                            <div className="flex items-center h-8">
+                              <Checkbox
+                                checked={!!a.concluida}
+                                onCheckedChange={(marcado) => {
+                                  if (a.concluida && marcado === false) {
+                                    marcarAtividadeConclusao(idx, ai, false);
+                                    if (pomodoroNestaLinha && pomoRodando) encerrarPomodoroSemToast();
+                                    return;
+                                  }
+                                  if (!a.concluida && marcado === true) {
+                                    toast.info("Use o Pomodoro ao lado — 8 min de foco — para concluir.");
+                                  }
+                                }}
+                                className="h-5 w-5 rounded-[6px]"
+                                aria-label={a.concluida ? "Desmarcar concluído" : "Concluído após Pomodoro"}
+                              />
+                            </div>
+                            {!a.concluida && (
+                              <Popover
+                                open={pomoPopoverChave === chaveLinha}
+                                onOpenChange={(aberto) => {
+                                  setPomoPopoverChave(aberto ? chaveLinha : null);
+                                }}
+                              >
+                                <PopoverTrigger asChild>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    aria-haspopup="dialog"
+                                    aria-expanded={pomoPopoverChave === chaveLinha}
+                                    className={cn(
+                                      "h-9 min-w-[7rem] shrink-0 justify-between gap-1.5 px-2.5 font-mono tabular-nums text-xs border-border bg-background/70",
+                                      pomodoroNestaLinha && pomoRodando && "border-accent/60 text-accent"
+                                    )}
+                                  >
+                                    <Clock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                                    <span className={cn(!pomodoroNestaLinha && !pomoRodando && "text-muted-foreground")}>
+                                      {formatoRelogioMMSS(visorRelogio)}
+                                    </span>
+                                    <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-50" aria-hidden />
+                                  </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-[240px] p-4 noise" align="start">
+                                  <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-3">
+                                    Pomodoro · foco único
+                                  </div>
+                                  <div
+                                    className="font-mono text-4xl tabular-nums tracking-tight text-center py-4 rounded-xl bg-secondary/50 border border-border/60"
+                                    aria-live="polite"
+                                  >
+                                    {formatoRelogioMMSS(pomodoroNestaLinha ? pomoSegundosRestantes : POMODORO_SEGUNDOS)}
+                                  </div>
+                                  <p className="text-[11px] text-muted-foreground mt-3 leading-snug">
+                                    Após {POMODORO_SEGUNDOS / 60} minutos a atividade será marcada. Cancelar ou outro ciclo redefine o cronômetro.
+                                  </p>
+                                  <div className="flex flex-col gap-2 mt-4">
+                                    {!pomoRodando ? (
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        className="w-full bg-gradient-hero hover:opacity-95"
+                                        onClick={() => iniciarPomodoro(idx, ai)}
+                                      >
+                                        Iniciar {POMODORO_SEGUNDOS / 60} min
+                                      </Button>
+                                    ) : pomodoroNestaLinha ? (
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        className="w-full"
+                                        onClick={cancelarPomodoroComReset}
+                                      >
+                                        Cancelar e zerar tempo
+                                      </Button>
+                                    ) : (
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="secondary"
+                                        className="w-full"
+                                        disabled
+                                      >
+                                        Outro Pomodoro ativo…
+                                      </Button>
+                                    )}
+                                  </div>
+                                </PopoverContent>
+                              </Popover>
+                            )}
                           </div>
+                            );
+                          })()}
                           <div className={cn(
                             "mt-0.5 h-8 w-8 rounded-lg grid place-items-center flex-shrink-0 transition-all",
                             a.tipo === "revisão" ? "bg-accent/15 text-accent" : "bg-primary/15 text-primary-foreground",
