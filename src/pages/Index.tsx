@@ -41,7 +41,15 @@ const CARGAS_ESTUDO: Record<number, string> = {
 
 const Index = () => {
   const [dataProva, setDataProva] = useState<Date | undefined>();
+  /** Somente horas por dia (inteiro 1–24), valor do input tipo número */
   const [tempoDiario, setTempoDiario] = useState<string>("3");
+
+  const tempoDiarioEmHorasDecimais = (): number => {
+    if (!tempoDiario.trim()) return 0;
+    const n = Number.parseInt(tempoDiario, 10);
+    if (Number.isNaN(n) || n <= 0) return 0;
+    return Math.min(24, n);
+  };
   const [conteudos, setConteudos] = useState<Conteudo[]>([
     { id: crypto.randomUUID(), nome: "", dificuldade: 3 },
   ]);
@@ -63,6 +71,9 @@ const Index = () => {
     const validos = conteudos.filter((c) => c.nome.trim().length > 0);
     if (validos.length === 0) return toast.error("Adicione ao menos um conteúdo");
 
+    const horasDia = tempoDiarioEmHorasDecimais();
+    if (horasDia <= 0) return toast.error("Informe um tempo diário maior que zero");
+
     setLoading(true);
     setPlano(null);
     try {
@@ -70,7 +81,7 @@ const Index = () => {
         body: {
           data_prova: format(dataProva, "yyyy-MM-dd"),
           data_atual: format(new Date(), "yyyy-MM-dd"),
-          tempo_diario: Number(tempoDiario) || 3,
+          tempo_diario: horasDia,
           preferencia: "qualquer",
           conteudos: validos.map((c) => ({ nome: c.nome.trim(), dificuldade: c.dificuldade })),
         },
@@ -329,15 +340,32 @@ const Index = () => {
               <Label className="flex items-center gap-2 text-xs uppercase tracking-wider text-muted-foreground font-medium">
                 <Clock className="h-3.5 w-3.5 text-accent" /> Horas por dia
               </Label>
-              <Input
-                type="number"
-                min="1"
-                max="24"
-                value={tempoDiario}
-                onChange={(e) => setTempoDiario(e.target.value)}
-                placeholder="Ex: 3"
-                className="h-12 bg-input/50 border-border text-base"
-              />
+              <div className="relative">
+                <Input
+                  type="number"
+                  min={1}
+                  max={24}
+                  step={1}
+                  inputMode="numeric"
+                  value={tempoDiario}
+                  onChange={(e) => setTempoDiario(e.target.value)}
+                  onBlur={() => {
+                    if (!tempoDiario.trim()) {
+                      setTempoDiario("3");
+                      return;
+                    }
+                    const n = Number.parseInt(tempoDiario, 10);
+                    if (Number.isNaN(n)) setTempoDiario("3");
+                    else setTempoDiario(String(Math.min(24, Math.max(1, n))));
+                  }}
+                  placeholder="3"
+                  className="h-12 bg-input/50 border-border text-base tabular-nums pr-10"
+                  aria-label="Horas de estudo por dia"
+                />
+                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground tabular-nums">
+                  h
+                </span>
+              </div>
             </div>
           </div>
 
