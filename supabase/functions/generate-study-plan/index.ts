@@ -35,9 +35,9 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) {
-      return new Response(JSON.stringify({ error: "LOVABLE_API_KEY missing" }), {
+    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
+    if (!GEMINI_API_KEY) {
+      return new Response(JSON.stringify({ error: "GEMINI_API_KEY missing" }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -113,44 +113,34 @@ ${body.conteudos
 
 Gere o JSON do cronograma agora.`;
 
-    const aiRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const aiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
+        systemInstruction: {
+          parts: [{ text: systemPrompt }]
+        },
+        contents: [
+          { role: "user", parts: [{ text: userPrompt }] }
         ],
-        response_format: { type: "json_object" },
+        generationConfig: {
+          responseMimeType: "application/json"
+        }
       }),
     });
 
-    if (aiRes.status === 429) {
-      return new Response(JSON.stringify({ error: "Limite de requisições excedido. Tente novamente em alguns instantes." }), {
-        status: 429,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    if (aiRes.status === 402) {
-      return new Response(JSON.stringify({ error: "Créditos de IA esgotados. Adicione créditos no workspace." }), {
-        status: 402,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
     if (!aiRes.ok) {
       const txt = await aiRes.text();
-      return new Response(JSON.stringify({ error: "Falha no AI Gateway", detail: txt }), {
+      return new Response(JSON.stringify({ error: "Falha na API do Gemini", detail: txt }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
     const aiJson = await aiRes.json();
-    const content = aiJson.choices?.[0]?.message?.content ?? "{}";
+    const content = aiJson.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}";
     let parsed;
     try {
       parsed = JSON.parse(content);
